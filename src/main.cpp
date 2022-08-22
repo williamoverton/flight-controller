@@ -28,23 +28,44 @@ MPU6050 mpu(Wire);
 /**
  * Pin setup
  */
-#define ELEVATOR_INPUT_CHANNEL 1
-#define ELEVATOR_OUTPUT_PIN 27
-#define AILERON_INPUT_CHANNEL 0
-#define AILERON_OUTPUT_PIN 26
+#define SERVO_OUT_ONE 16
+#define SERVO_OUT_TWO 17
+#define SERVO_OUT_THREE 18
+#define SERVO_OUT_FOUR 19
+#define SERVO_OUT_FIVE 20
+#define SERVO_OUT_SIX 21
 
+/**
+ * Channel Setup
+ */
+#define ROLL_INPUT_CHANNEL 0
+#define PITCH_INPUT_CHANNEL 1
+#define YAW_INPUT_CHANNEL 2
+#define THROTTLE_INPUT_CHANNEL 3
+#define MOTOR_ENABLE_INPUT_CHANNEL 4
 #define MODESELECT_INPUT_CHANNEL 5
 
 /**
  * TUNING VARIABLES
  */
 static int hold_mode = CANCEL_OUT_MOVEMENT;
-static float elevator_stab_gain = 1;
-static float aileron_stab_gain = 1;
+static float pitch_stab_gain = 1;
+static float roll_stab_gain = 1;
+static float yaw_stab_gain = 1;
 
 /**
  * Done with config!
  */
+
+/**
+ * Global vars
+ */
+static float output_one = 0;
+static float output_two = 0;
+static float output_three = 0;
+static float output_four = 0;
+static float output_five = 0;
+static float output_six = 0;
 
 void setupPins()
 {
@@ -71,28 +92,36 @@ void setupMpu()
   Serial.println("Done!\n");
 }
 
-Servo elevatorServo;
-Servo aileronServo;
+Servo servo_one;
+Servo servo_two;
+Servo servo_three;
+Servo servo_four;
+Servo servo_five;
+Servo servo_six;
 
 void setupServos()
 {
-  elevatorServo.attach(ELEVATOR_OUTPUT_PIN);
-  aileronServo.attach(AILERON_OUTPUT_PIN);
+  servo_one.attach(SERVO_OUT_ONE);
+  servo_two.attach(SERVO_OUT_TWO);
+  servo_three.attach(SERVO_OUT_THREE);
+  servo_four.attach(SERVO_OUT_FOUR);
+  servo_five.attach(SERVO_OUT_FIVE);
+  servo_six.attach(SERVO_OUT_SIX);
 }
 
 // Roll PID Controller
 double rollPidSetpoint, rollPidInput, rollPidOutput;
-double rollPidKp = 1, rollPidKi = 0.005, rollPidKd = 0.2;
+double rollPidKp = 1, rollPidKi = 0, rollPidKd = 0.2;
 PID rollPID(&rollPidInput, &rollPidOutput, &rollPidSetpoint, rollPidKp, rollPidKi, rollPidKd, DIRECT);
 
 // Pitch PID Controller
 double pitchPidSetpoint, pitchPidInput, pitchPidOutput;
-double pitchPidKp = 1, pitchPidKi = 0.005, pitchPidKd = 0.2;
+double pitchPidKp = 1, pitchPidKi = 0, pitchPidKd = 0.2;
 PID pitchPID(&pitchPidInput, &pitchPidOutput, &pitchPidSetpoint, pitchPidKp, pitchPidKi, pitchPidKd, DIRECT);
 
 // Yaw PID Controller
 double yawPidSetpoint, yawPidInput, yawPidOutput;
-double yawPidKp = 1, yawPidKi = 0.005, yawPidKd = 0.2;
+double yawPidKp = 1, yawPidKi = 0, yawPidKd = 0.2;
 PID yawPID(&yawPidInput, &yawPidOutput, &yawPidSetpoint, yawPidKp, yawPidKi, yawPidKd, DIRECT);
 
 void setupPids()
@@ -166,10 +195,14 @@ void printGyroInfo()
   //  Serial.print(F("ACC X: "));Serial.println(mpu.getAccX());
 }
 
-float elevatorStabData = 0;
-float aileronStabData = 0;
-float rcInputElevator = 0.5;
-float rcInputAileron = 0.5;
+float pitchStabData = 0;
+float rollStabData = 0;
+float yawStabData = 0;
+
+float rcInputPitch = 0;
+float rcInputRoll = 0;
+float rcInputYaw = 0;
+float rcInputThrottle = 0;
 
 void computeStabilization()
 {
@@ -183,11 +216,15 @@ void computeStabilization()
 
     rollPidInput = mpu.getGyroX() / 90.0;
     rollPID.Compute();
-    aileronStabData = min(1.0, max(0.0, rollPidOutput * aileron_stab_gain + 0.5));
+    rollStabData = min(0.5, max(-0.5, rollPidOutput * roll_stab_gain));
 
     pitchPidInput = (mpu.getGyroY() / 90.0);
     pitchPID.Compute();
-    elevatorStabData = min(1.0, max(0.0, pitchPidOutput * elevator_stab_gain + 0.5));
+    pitchStabData = min(0.5, max(-0.5, pitchPidOutput * pitch_stab_gain));
+
+    yawPidInput = (mpu.getGyroZ() / 90.0);
+    yawPID.Compute();
+    yawStabData = min(0.5, max(-0.5, yawPidOutput * yaw_stab_gain));
   }
   else if (hold_mode == HOLD_ATTITUDE)
   {
@@ -195,11 +232,19 @@ void computeStabilization()
 
     rollPidInput = (mpu.getAngleX() / 90.0);
     rollPID.Compute();
-    aileronStabData = min(1.0, max(0.0, rollPidOutput * aileron_stab_gain + 0.5));
+    rollStabData = min(0.5, max(-0.5, rollPidOutput * roll_stab_gain));
 
     pitchPidInput = (mpu.getAngleY() / 90.0);
     pitchPID.Compute();
-    elevatorStabData = min(1.0, max(0.0, pitchPidOutput * elevator_stab_gain + 0.5));
+    pitchStabData = min(0.5, max(-0.5, pitchPidOutput * pitch_stab_gain));
+
+    /**
+     * Always use Gyro not angle for yaw
+     * because z drift is a mad ting init
+     */
+    yawPidInput = (mpu.getGyroZ() / 90.0);
+    yawPID.Compute();
+    yawStabData = min(0.5, max(-0.5, yawPidOutput * yaw_stab_gain));
   }
 }
 
@@ -216,14 +261,19 @@ float readChannel(int channel, float minLimit, float maxLimit, float defaultValu
 
 void readController()
 {
+  // Get raw data from receiver
   for (byte channel = 0; channel < CHANNEL_AMOUNT; channel++)
   {
     raw_channel_values[channel] = ppm.rawChannelValue(channel + 1);
   }
 
-  rcInputAileron = readChannel(AILERON_INPUT_CHANNEL, 0, 1, 0.5);
-  rcInputElevator = readChannel(ELEVATOR_INPUT_CHANNEL, 0, 1, 0.5);
+  // Read stick inputs
+  rcInputRoll = readChannel(ROLL_INPUT_CHANNEL, -0.5, 0.5, 0);
+  rcInputPitch = readChannel(PITCH_INPUT_CHANNEL, -0.5, 0.5, 0);
+  rcInputYaw = readChannel(YAW_INPUT_CHANNEL, -0.5, 0.5, 0);
+  rcInputThrottle = readChannel(THROTTLE_INPUT_CHANNEL, 0, 1, 0);
 
+  // Mode select switch
   float modeSelect = readChannel(MODESELECT_INPUT_CHANNEL, 0.0, 1.0, 0);
   if (modeSelect < 0.33)
   {
@@ -244,13 +294,29 @@ void positionServos()
   int min_value = 0;
   int max_value = 180;
 
-  elevatorServo.write(max(min_value, min(max_value, ((elevatorStabData - 0.5) + (rcInputElevator - 0.5) + 0.5) * (max_value - min_value * 0.5))));
-  aileronServo.write(max(min_value, min(max_value, ((aileronStabData - 0.5) + (rcInputAileron - 0.5) + 0.5) * (max_value - min_value * 0.5))));
+  servo_one.write(max(min_value, min(max_value, (output_one + 0.5) * (max_value - min_value * 0.5))));
+  servo_two.write(max(min_value, min(max_value, (output_two + 0.5) * (max_value - min_value * 0.5))));
+  servo_three.write(max(min_value, min(max_value, (output_three + 0.5) * (max_value - min_value * 0.5))));
+  servo_four.write(max(min_value, min(max_value, (output_four + 0.5) * (max_value - min_value * 0.5))));
+  servo_five.write(max(min_value, min(max_value, (output_five + 0.5) * (max_value - min_value * 0.5))));
+  servo_six.write(max(min_value, min(max_value, (output_six + 0.5) * (max_value - min_value * 0.5))));
 }
 
 int timer;
+int counter = 0;
+int hzTimer = 0;
 void loopRate(int rate)
 {
+  counter++;
+
+  if (hzTimer < millis())
+  {
+    Serial.print("Clock Counter: ");
+    Serial.println(counter);
+    counter = 0;
+    hzTimer = millis() + 1000;
+  }
+
   float timeBetween = (float)1000 / (float)rate;
   if (millis() - timer > timeBetween)
   {
@@ -266,34 +332,32 @@ void loopRate(int rate)
 
 void userDefinedFunctions()
 {
+  /**
+   * Adjust gains for different modes
+   */
   if (hold_mode == NO_STABILISATION)
   {
   }
   else if (hold_mode == CANCEL_OUT_MOVEMENT)
   {
-    elevator_stab_gain = 0.1;
-    aileron_stab_gain = 0.1;
+    pitch_stab_gain = 0.2;
+    roll_stab_gain = 0.2;
   }
   else if (hold_mode == HOLD_ATTITUDE)
   {
-    elevator_stab_gain = 1;
-    aileron_stab_gain = 1;
+    pitch_stab_gain = 1;
+    roll_stab_gain = 1;
   }
+
+  /**
+   * Configure Output Channels
+   */
+  output_one = pitchStabData + rcInputPitch;
+  output_two = rollStabData + rcInputRoll;
 }
 
-int counter = 0;
-int hzTimer = 0;
 void loop()
 {
-  counter++;
-
-  if (hzTimer < millis())
-  {
-    Serial.println(counter);
-    counter = 0;
-    hzTimer = millis() + 1000;
-  }
-
   userDefinedFunctions();
 
   mpu.update();
@@ -303,7 +367,7 @@ void loop()
   readController();
   positionServos();
 
-  // loopRate(2000);
+  loopRate(500);
 }
 
 void loop1()
